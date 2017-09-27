@@ -235,7 +235,7 @@ PACKAGES = [
 		"c3e5e9fdd5004dcb542feda5ee4f0ff0744628baf8ed2dd5d66f8ca1197cb1a1",
 		"zlib"),
 	SourcePackage(
-		"http://prdownloads.sourceforge.net/libpng/libpng-1.6.27.tar.gz",
+                "https://src.fedoraproject.org/repo/pkgs/libpng/libpng-1.6.27.tar.gz/sha512/fac2945fec7ad24c47775d1e8c6d6c84c198e0286349e9b51424da5400735c62c70fd61f5f14a6effa5f2db3113e754e61eb1c52bcaac231a2760315031f79ba/libpng-1.6.27.tar.gz",
 		"libpng-1.6.27.tar.gz",
 		"c9d164ec247f426a525a7b89936694aefbc91fb7a50182b198898b8fc91174b4",
 		"libpng",
