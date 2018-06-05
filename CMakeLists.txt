@@ -88,6 +88,9 @@ add_subdirectory(external/glslang)
 # spirv-tools
 add_subdirectory(external/spirv-tools)
 
+# VkRunner
+add_subdirectory(external/vkrunner)
+
 # spirv-headers
 include_directories(external/spirv-headers/src/include)
 

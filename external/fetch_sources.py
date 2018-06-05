@@ -264,6 +264,11 @@ PACKAGES = [
 		None,
 		"757bcc0fd53fc81897db309a35c85dcdbbe1e466",
 		"spirv-headers"),
+	GitRepo(
+		"https://github.com/Igalia/vkrunner.git",
+		None,
+		"251f59e3d6129b29d92b2764c1cf7c830ba5e682",
+		"vkrunner"),
 ]
 
 def parseArgs ():
