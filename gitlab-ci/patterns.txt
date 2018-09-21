@@ -1,0 +1,6 @@
+# Format: <include/exclude>-<driver>-<vulkan/opengl>: tests
+# If <include> is used, it will run only those tests.
+# Otherwise, it will run all the tests except those <exclude>
+
+exclude-i965-opengl: program_interface_query.*invalid-enum
+exclude-i965-opengl: shader_subroutine.*ssbo_atomic_image_load_store

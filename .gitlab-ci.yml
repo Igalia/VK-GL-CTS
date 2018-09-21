@@ -1,0 +1,108 @@
+image: docker:latest
+
+stages:
+  - build
+  - run
+
+variables:
+  MESA_VERSION: base
+  VK_GL_CTS_VERSION: ${MESA_VERSION}_${CI_COMMIT_REF_SLUG}
+  BASE_IMAGE: ${CI_REGISTRY}/${CI_PROJECT_NAMESPACE}/mesa:${MESA_VERSION}
+  DOCKER_IMAGE: ${CI_REGISTRY_IMAGE}
+  CCACHE_DIR: ${CI_PROJECT_DIR}/../ccache
+  FPR_VERBOSITY: "full"  # full, normal, quite
+
+cache:
+  paths:
+    - ccache/
+  key: "$CI_JOB_STAGE"
+
+build:
+  stage: build
+  services:
+    - docker:dind
+  before_script:
+    - mkdir -p ccache
+    - rm -fr ../ccache
+    - mv ccache ../
+    - export MAKEFLAGS=-j$(nproc)
+    - apk --no-cache add libc6-compat
+    - wget https://github.com/grammarly/rocker/releases/download/1.3.1/rocker-1.3.1-linux_amd64.tar.gz
+    - tar xvf rocker-1.3.1-linux_amd64.tar.gz
+    - rm rocker-1.3.1-linux_amd64.tar.gz
+    - mv rocker ..
+    - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
+  after_script:
+    - mv ../ccache ./
+    - docker push $CI_REGISTRY_IMAGE:$VK_GL_CTS_VERSION
+  script:
+    - ../rocker build -f gitlab-ci/Rockerfile.vk-gl-cts --var TAG=$VK_GL_CTS_VERSION .
+
+.run: &run_testsuite
+  image:
+    name: $CI_REGISTRY_IMAGE:$VK_GL_CTS_VERSION
+  stage: run
+  cache: {}
+  artifacts:
+    name: ${CI_JOB_NAME//:/-}_${VK_GL_CTS_VERSION}_results
+    paths:
+      - results/
+    when: always
+    expire_in: 4 months
+  only:
+    - pipelines
+  # variables:
+  #   DRIVER: "i965 | nouveau | nvidia | radeon | amd | llvmpipe | softpipe | anv | radv"
+  #   TESTSUITE: "vulkan | opengl"
+  before_script:
+    - pip install six mako
+    - MESA_COMMIT=$(grep commit /home/local/mesa-head.txt | cut -d" " -f 2)
+    - export DISPLAY=unix:$(ls /tmp/.X11-unix/X* | head -n 1  | xargs basename  | cut -c2-)
+    - mkdir -p results/
+  script:
+    - if [ "$TEST_REFERENCE" ] && [ -z "$ARTIFACT_TOKEN" ] ; then echo "No ARTIFACT_TOKEN; skipping report" ; fi
+    - if [ "$TEST_REFERENCE" ] && [ "$ARTIFACT_TOKEN" ] ; then USE_REFERENCE=true ; fi
+    - if [ "$USE_REFERENCE" ] ; then /home/local/vk-gl-cts/gitlab-ci/download-artifact.sh $ARTIFACT_TOKEN ${CI_JOB_NAME//:/-}_${TEST_REFERENCE}_results.zip $PWD/reference.zip ; fi
+    - if [ "$USE_REFERENCE" ] ; then mkdir -p reference && unzip -q reference.zip -d reference/ ; fi
+    - if [ "$USE_REFERENCE" ] ; then REFERENCE_OPTIONS="--$TESTSUITE-test-reference $(dirname $(find $PWD/reference -name results.json.bz2))" ; fi
+    - cp /home/local/mesa-head.txt results
+    - cp /home/local/vk-gl-cts-head.txt results
+    - glxinfo -B >> results/info.txt
+    - uname -a >> results/info.txt
+    - echo "Branch is ${VK_GL_CTS_VERSION}" >> results/info.txt
+    - echo "Job is ${CI_JOB_NAME}" >> results/info.txt
+    - if [ "$USE_REFERENCE" ] ;  then echo "Test reference is ${TEST_REFERENCE}" >> results/info.txt ; else echo "Test reference is <none>" >> results/info.txt ; fi
+    - sudo -g video /home/local/vk-gl-cts/gitlab-ci/run-testsuite.sh --run-$TESTSUITE --vk-cts-all-concurrent --base-path /home/local --verbosity $FPR_VERBOSITY --patterns-file /home/local/vk-gl-cts/gitlab-ci/patterns.txt --results-path $PWD/results --create-report $REFERENCE_OPTIONS --commit $MESA_COMMIT --driver $DRIVER
+  tags:
+    - mesa
+    - test
+
+run:gl:kbl:
+  variables:
+    DRIVER: "i965"
+    TESTSUITE: "opengl"
+  <<: *run_testsuite
+  tags:
+    - mesa
+    - test
+    - kbl
+
+run:gl:skl:
+  variables:
+    DRIVER: "i965"
+    TESTSUITE: "opengl"
+  <<: *run_testsuite
+  tags:
+    - mesa
+    - test
+    - skl
+
+run:gl:bdw:
+  variables:
+    DRIVER: "i965"
+    TESTSUITE: "opengl"
+  <<: *run_testsuite
+  tags:
+    - mesa
+    - test
+    - bdw
