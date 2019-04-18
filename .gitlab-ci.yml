@@ -1,0 +1,132 @@
+image: docker:latest
+
+services:
+  - docker:dind
+
+stages:
+  - build
+  - run
+
+variables:
+  DOCKER_IMAGE: $CI_REGISTRY_IMAGE
+  CCACHE_DIR: $CI_PROJECT_DIR/../ccache
+
+cache:
+  paths:
+    - ccache/
+  key: "$CI_JOB_STAGE"
+
+.build:
+  variables:
+    BASE_IMAGE: $CI_REGISTRY/$CI_PROJECT_NAMESPACE/mesa:$MESA_VERSION
+    VK_GL_CTS_VERSION: ${MESA_VERSION}__${CI_COMMIT_REF_SLUG}
+  stage: build
+  before_script:
+    - mkdir -p ccache
+    - rm -fr ../ccache
+    - mv ccache ../
+    - export MAKEFLAGS=-j$(nproc)
+    - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
+    - apk --no-cache add libc6-compat openssh-client python git
+    - export DUMMY="${CI_COMMIT_REF_SLUG}-cl"
+    - if [ ${DUMMY:0:24} == "gl-cts-testing-master-cl" ]; then export PUSH=1; fi
+    - if [ ${DUMMY:0:34} == "gl-cts-testing-opengl-cts-4-6-0-cl" ]; then export GTF="gl"; export PUSH=1; fi
+    - if [ ${DUMMY:0:37} == "gl-cts-testing-opengl-es-cts-3-2-5-cl" ]; then export GTF="gles32"; export TARGET="wayland"; export PUSH=1; fi
+    - if [ ${DUMMY:0:39} == "gl-cts-testing-opengl-es-cts-3-2-5-x-cl" ]; then export GTF="gles32"; export PUSH=1; fi
+    - if [ ${CI_COMMIT_REF_SLUG:0:24} == "gl-cts-testing-master-cl" ]; then export BASE_IMAGE=$CI_REGISTRY/$CI_PROJECT_NAMESPACE/vk-gl-cts:"${MESA_VERSION}__gl-cts-testing-master"; export CL_BUILD=1; fi
+    - if [ ${CI_COMMIT_REF_SLUG:0:34} == "gl-cts-testing-opengl-cts-4-6-0-cl" ]; then export BASE_IMAGE=$CI_REGISTRY/$CI_PROJECT_NAMESPACE/vk-gl-cts:"${MESA_VERSION}__gl-cts-testing-opengl-cts-4-6-0"; export CL_BUILD=1; fi
+    - if [ ${CI_COMMIT_REF_SLUG:0:37} == "gl-cts-testing-opengl-es-cts-3-2-5-cl" ]; then export BASE_IMAGE=$CI_REGISTRY/$CI_PROJECT_NAMESPACE/vk-gl-cts:"${MESA_VERSION}__gl-cts-testing-opengl-es-cts-3-2-5"; export CL_BUILD=1; fi
+    - if [ ${CI_COMMIT_REF_SLUG:0:36} == "gl-cts-testing-opengl-es-cts-3-2-5-x" ]; then export BASE_IMAGE="${BASE_IMAGE}-565"; export VK_GL_CTS_VERSION="${MESA_VERSION}-565__${CI_COMMIT_REF_SLUG}"; fi
+  script:
+    - eval $(ssh-agent -s)
+    - echo -e "$SSH_PRIVATE_KEY" | ssh-add -
+    - mkdir -p ~/.ssh
+    - echo -e "Host *\n   StrictHostKeyChecking no" > ~/.ssh/config
+    - if [ ! -z ${GTF+x} ]; then python ./external/fetch_kc_cts.py --protocol ssh; fi
+    - python ./external/fetch_sources.py --protocol ssh
+    - ./rocker build --var TAG=$VK_GL_CTS_VERSION .
+    - if [ ! -z ${PUSH+x} ]; then docker push $CI_REGISTRY_IMAGE:$VK_GL_CTS_VERSION; fi
+  after_script:
+    - mv ../ccache .
+  tags:
+    - mesa
+    - build
+
+.run:
+  variables:
+    GIT_STRATEGY: none
+    VK_GL_CTS_VERSION: ${MESA_VERSION}__${CI_COMMIT_REF_SLUG}
+  image:
+    name: $CI_REGISTRY_IMAGE:$VK_GL_CTS_VERSION
+  stage: run
+  cache: {}
+  when: manual
+  artifacts:
+    name: ${CI_JOB_NAME//:/-}_${VK_GL_CTS_VERSION}_results
+    paths:
+      - results/
+    when: always
+    expire_in: 1 month
+  before_script:
+    - export DISPLAY=unix:$(ls /tmp/.X11-unix/X* | head -n 1 | xargs basename | cut -c2-)
+    - export RENDERGROUP=$(stat -c '%g' /dev/dri/renderD128)
+    - export XDG_RUNTIME_DIR=/tmp
+    - export PIGLIT_DEQP_VK_EXTRA_ARGS="--deqp-log-images=disable --deqp-log-shader-sources=disable --deqp-log-flush=disable --deqp-shadercache=disable"
+    - mkdir -p results/
+    - git -C /home/mesa/mesa log --oneline -10 > results/mesa.txt
+    - git -C /home/mesa/vk-gl-cts log --oneline -10 > results/vk-gl-cts.txt
+    - weston &
+    - sleep 3s
+  script:
+    - if [ "$OPTIMIZE_SPIRV" ] ; then export OPTIMIZATION_RECIPE=$(seq 1 8 | shuf | head -n 1) ; fi
+    - if [ "$OPTIMIZE_SPIRV" ] ; then echo "Optimization recipe is ${OPTIMIZATION_RECIPE}" > results/optimization.txt ; fi
+    - if [ "$OPTIMIZE_SPIRV" ] ; then  export PIGLIT_DEQP_VK_EXTRA_ARGS="$PIGLIT_DEQP_VK_EXTRA_ARGS --deqp-optimize-spirv=enable --deqp-optimization-recipe=$OPTIMIZATION_RECIPE" ; fi
+    - sudo -E -g#$RENDERGROUP /home/mesa/piglit/piglit run tests/deqp_vk -c --deqp-mode=group results/data
+    - /home/mesa/piglit/piglit summary html results/html results/data
+
+build:master:
+  extends: .build
+  variables:
+    MESA_VERSION: "gl-cts-testing-opengl-cts-4-6-0"
+
+# run:master:kbl:
+#   extends: .run
+#   variables:
+#     MESA_VERSION: "gl-cts-testing-opengl-cts-4-6-0"
+#   tags:
+#     - mesa
+#     - test
+#     - kbl
+
+# run:master:skl:
+#   extends: .run
+#   variables:
+#     MESA_VERSION: "gl-cts-testing-opengl-cts-4-6-0"
+#   tags:
+#     - mesa
+#     - test
+#     - skl
+
+# run:master:bdw:
+#   extends: .run
+#   variables:
+#     MESA_VERSION: "gl-cts-testing-opengl-cts-4-6-0"
+#   tags:
+#     - mesa
+#     - test
+#     - bdw
+
+# run:master:opt:kbl:
+#   extends: run:master:kbl
+#   variables:
+#     OPTIMIZE_SPIRV: "true"
+
+# run:master:opt:skl:
+#   extends: run:master:skl
+#   variables:
+#     OPTIMIZE_SPIRV: "true"
+
+# run:master:opt:bdw:
+#   extends: run:master:bdw
+#   variables:
+#     OPTIMIZE_SPIRV: "true"

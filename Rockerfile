@@ -1,0 +1,80 @@
+{{ $base_image := (or .Env.BASE_IMAGE "igalia/mesa:master") }}
+{{ $image := (or .Env.DOCKER_IMAGE "igalia/vk-gl-cts") }}
+{{ $debug_build := (or .Env.DEBUG "true") }}
+{{ $deqp_target := (or .Env.TARGET "x11_egl") }}
+
+FROM {{ $base_image }}
+
+LABEL maintainer "Juan A. Suarez Romero <jasuarez@igalia.com>"
+
+{{ if .Env.CL_BUILD }}
+RUN rm -rf /home/mesa/vk-gl-cts
+{{ else }}
+RUN apt-get update                                               \
+        && apt-get -y install cmake libpng-dev python libvulkan1 \
+           ssh less nano                                         \
+           {{ if eq $deqp_target "wayland" }}weston{{ end }}     \
+        && rm -fr /var/lib/apt/lists/*
+
+USER mesa
+
+WORKDIR /home/mesa
+
+RUN git clone https://github.com/Igalia/piglit -b wip/agomez/dcbaker-deqp-group-at-a-time-_-khr-gl45
+
+RUN git clone http://github.com/Igalia/piglit.git /home/mesa/piglit.git
+
+ENV INTEL_PRECISE_TRIG=1
+
+ENV vblank_mode=0
+
+ENV PIGLIT_DEQP_VK_BIN=/home/mesa/vk-gl-cts_build/external/vulkancts/modules/vulkan/deqp-vk
+
+ENV PIGLIT_DEQP_EGL_BIN=/home/mesa/vk-gl-cts_build/external/openglcts/modules/glcts
+
+ENV PIGLIT_DEQP_GLES2_BIN=/home/mesa/vk-gl-cts_build/external/openglcts/modules/glcts
+
+ENV PIGLIT_DEQP_GLES3_BIN=/home/mesa/vk-gl-cts_build/external/openglcts/modules/glcts
+
+ENV PIGLIT_DEQP_GLES31_BIN=/home/mesa/vk-gl-cts_build/external/openglcts/modules/glcts
+
+ENV PIGLIT_KHR_GL_BIN=/home/mesa/vk-gl-cts_build/external/openglcts/modules/glcts
+
+ENV PIGLIT_KHR_SINGLE_GL_BIN=/home/mesa/vk-gl-cts_build/external/openglcts/modules/glcts
+
+ENV PIGLIT_KHR_GLES_BIN=/home/mesa/vk-gl-cts_build/external/openglcts/modules/glcts
+
+ENV PIGLIT_KHR_SINGLE_GLES_BIN=/home/mesa/vk-gl-cts_build/external/openglcts/modules/glcts
+
+ENV PIGLIT_KHR_NOCTX_BIN=/home/mesa/vk-gl-cts_build/external/openglcts/modules/glcts
+
+ENV PIGLIT_GTF_GL_BIN=/home/mesa/vk-gl-cts_build/external/openglcts/modules/glcts
+
+ENV PIGLIT_GTF_GLES_BIN=/home/mesa/vk-gl-cts_build/external/openglcts/modules/glcts
+{{ end }}
+
+{{ if .Env.MAKEFLAGS }}
+ENV MAKEFLAGS={{ .Env.MAKEFLAGS }}
+{{ end }}
+
+{{ if .Env.CCACHE_DIR }}
+MOUNT {{ .Env.CCACHE_DIR }}:/home/mesa/.ccache:Z
+RUN sudo chown -R mesa:mesa /home/mesa/.ccache
+{{ end }}
+
+ADD . /home/mesa/vk-gl-cts
+
+RUN sudo chown -R mesa:mesa /home/mesa/vk-gl-cts
+
+WORKDIR /home/mesa/vk-gl-cts
+
+RUN cmake . -GNinja -B../vk-gl-cts_build -DDEQP_TARGET={{ $deqp_target }}         \
+             {{ if ne $debug_build "true" }} -DCMAKE_BUILD_TYPE=Release {{ end }} \
+             {{ if .Env.GTF }} -DGLCTS_GTF_TARGET={{ .Env.GTF }} {{ end }}        \
+        && cmake --build ../vk-gl-cts_build
+
+WORKDIR /home/mesa
+
+{{ if .TAG }}
+TAG {{ $image }}:{{ .TAG }}
+{{ end }}
